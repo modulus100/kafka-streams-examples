@@ -5,9 +5,7 @@ import org.apache.kafka.streams.StreamsBuilder;
 import org.apache.kafka.streams.kstream.Consumed;
 import org.apache.kafka.streams.kstream.KStream;
 import org.apache.kafka.streams.kstream.Produced;
-import org.apache.kafka.streams.processor.api.ProcessorContext;
 import org.apache.kafka.streams.processor.api.ProcessorSupplier;
-import org.apache.kafka.streams.processor.api.Record;
 import org.apache.kafka.streams.state.KeyValueStore;
 import org.apache.kafka.streams.state.StoreBuilder;
 import org.apache.kafka.streams.state.Stores;
@@ -17,16 +15,20 @@ import org.springframework.context.annotation.Configuration;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
 
-import java.nio.charset.StandardCharsets;
-import java.security.MessageDigest;
-import java.security.NoSuchAlgorithmException;
-import java.time.Duration;
-
 @Configuration
 public class DeduplicationTopology {
     private static final String DEDUP_STORE_NAME = "deduplication-store";
 
     private final ObjectMapper objectMapper = new ObjectMapper();
+
+    private record DedupKey(
+            String orderId,
+            String customerId,
+            String cardName,
+            Long amountCents,
+            String currency
+    ) {
+    }
 
     @Value("${deduplication.input-topic}")
     private String inputTopic;
@@ -60,7 +62,7 @@ public class DeduplicationTopology {
     }
 
     private ProcessorSupplier<String, String, String, String> processorSupplier() {
-        return () -> new DeduplicationProcessor(ttlMs, cleanupIntervalMs);
+        return () -> new DeduplicationProcessor(DEDUP_STORE_NAME, ttlMs, cleanupIntervalMs);
     }
 
     private String fingerprint(String value) {
@@ -68,82 +70,68 @@ public class DeduplicationTopology {
             return null;
         }
 
-//        try {
-            JsonNode node = objectMapper.readTree(value);
-            String canonical = node.toString();
-            return sha256Hex(canonical);
-//        } catch (JsonProcessingException e) {
-//            return sha256Hex(value);
-//        }
-    }
-
-    private static String sha256Hex(String input) {
-        MessageDigest md;
         try {
-            md = MessageDigest.getInstance("SHA-256");
-        } catch (NoSuchAlgorithmException e) {
-            throw new IllegalStateException(e);
-        }
+            JsonNode node = objectMapper.readTree(value);
+            DedupKey key = new DedupKey(
+                    normalize(textOrNull(node, "orderId")),
+                    normalize(textOrNull(node, "customerId")),
+                    normalize(textOrNull(node, "cardName")),
+                    longOrNull(node, "amountCents"),
+                    normalize(textOrNull(node, "currency"))
+            );
 
-        byte[] digest = md.digest(input.getBytes(StandardCharsets.UTF_8));
-        StringBuilder sb = new StringBuilder(digest.length * 2);
-        for (byte b : digest) {
-            sb.append(String.format("%02x", b));
-        }
-        return sb.toString();
-    }
-
-    private static class DeduplicationProcessor implements org.apache.kafka.streams.processor.api.Processor<String, String, String, String> {
-        private final long ttlMs;
-        private final long cleanupIntervalMs;
-
-        private ProcessorContext<String, String> context;
-        private KeyValueStore<String, Long> store;
-
-        private DeduplicationProcessor(long ttlMs, long cleanupIntervalMs) {
-            this.ttlMs = ttlMs;
-            this.cleanupIntervalMs = cleanupIntervalMs;
-        }
-
-        @Override
-        public void init(ProcessorContext<String, String> context) {
-            this.context = context;
-            this.store = context.getStateStore(DEDUP_STORE_NAME);
-
-            context.schedule(Duration.ofMillis(cleanupIntervalMs), org.apache.kafka.streams.processor.PunctuationType.WALL_CLOCK_TIME, timestamp -> {
-                try (var iter = store.all()) {
-                    while (iter.hasNext()) {
-                        var entry = iter.next();
-                        Long lastSeen = entry.value;
-                        if (lastSeen == null) {
-                            store.delete(entry.key);
-                            continue;
-                        }
-                        if (timestamp - lastSeen > ttlMs) {
-                            store.delete(entry.key);
-                        }
-                    }
-                }
-            });
-        }
-
-        @Override
-        public void process(Record<String, String> record) {
-            if (record == null) {
-                return;
-            }
-
-            String fingerprint = record.key();
-            if (fingerprint == null) {
-                return;
-            }
-
-            long now = context.currentSystemTimeMs();
-            Long lastSeen = store.get(fingerprint);
-            if (lastSeen == null || now - lastSeen > ttlMs) {
-                store.put(fingerprint, now);
-                context.forward(record);
-            }
+            return Integer.toHexString(key.hashCode());
+        } catch (Exception e) {
+            DedupKey key = new DedupKey(null, null, normalize(value), null, null);
+            return Integer.toHexString(key.hashCode());
         }
     }
+
+    private static String textOrNull(JsonNode node, String fieldName) {
+        if (node == null || fieldName == null) {
+            return null;
+        }
+
+        JsonNode field = node.get(fieldName);
+        if (field == null || field.isNull() || field.isMissingNode()) {
+            return null;
+        }
+
+        String v = field.asText();
+        return v == null || v.isBlank() ? null : v;
+    }
+
+    private static Long longOrNull(JsonNode node, String fieldName) {
+        if (node == null || fieldName == null) {
+            return null;
+        }
+
+        JsonNode field = node.get(fieldName);
+        if (field == null || field.isNull() || field.isMissingNode()) {
+            return null;
+        }
+
+        if (field.isNumber()) {
+            return field.longValue();
+        }
+
+        try {
+            String v = field.asText();
+            if (v == null || v.isBlank()) {
+                return null;
+            }
+            return Long.parseLong(v);
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    private static String normalize(String s) {
+        if (s == null) {
+            return null;
+        }
+        String v = s.trim();
+        return v.isEmpty() ? null : v.toLowerCase();
+    }
+
 }
