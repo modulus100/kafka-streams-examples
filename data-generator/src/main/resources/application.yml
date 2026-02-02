@@ -1,0 +1,17 @@
+spring:
+  application:
+    name: data-generator
+  main:
+    web-application-type: none
+  kafka:
+    bootstrap-servers: localhost:29092
+    producer:
+      key-serializer: org.apache.kafka.common.serialization.StringSerializer
+      value-serializer: org.springframework.kafka.support.serializer.JsonSerializer
+      properties:
+        spring.json.add.type.headers: false
+
+generator:
+  interval-ms: 1000
+  payments-topic: payments-authorized
+  inventory-topic: inventory-reserved

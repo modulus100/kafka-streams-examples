@@ -17,4 +17,4 @@ plugins {
 }
 
 rootProject.name = "kafka-streams-examples"
-include("stream-join", "list", "utilities")
+include("stream-join-simple", "stream-join-with-repartition", "stream-deduplication", "data-generator", "list", "utilities")

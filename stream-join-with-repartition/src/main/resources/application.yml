@@ -1,0 +1,21 @@
+spring:
+  application:
+    name: stream-join-with-repartition
+  kafka:
+    bootstrap-servers: localhost:29092
+    producer:
+      key-serializer: org.apache.kafka.common.serialization.StringSerializer
+      value-serializer: org.springframework.kafka.support.serializer.JsonSerializer
+      properties:
+        spring.json.add.type.headers: false
+    streams:
+      application-id: stream-join-with-repartition-payments
+      properties:
+        default.timestamp.extractor: org.apache.kafka.streams.processor.WallclockTimestampExtractor
+        cache.max.bytes.buffering: 0
+
+generator:
+  enabled: true
+  interval-ms: 1000
+  payments-topic: payments-authorized
+  inventory-topic: inventory-reserved

@@ -1,0 +1,16 @@
+spring:
+  application:
+    name: stream-deduplication
+  kafka:
+    bootstrap-servers: localhost:29092
+    streams:
+      application-id: stream-deduplication
+      properties:
+        default.timestamp.extractor: org.apache.kafka.streams.processor.WallclockTimestampExtractor
+        cache.max.bytes.buffering: 0
+
+deduplication:
+  input-topic: input-events
+  output-topic: output-events
+  ttl-ms: 60000
+  cleanup-interval-ms: 10000

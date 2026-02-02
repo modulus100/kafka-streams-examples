@@ -1,0 +1,10 @@
+spring:
+  application:
+    name: stream-join-simple
+  kafka:
+    bootstrap-servers: localhost:9092
+    streams:
+      application-id: stream-join-simple-payments
+      properties:
+        default.timestamp.extractor: org.apache.kafka.streams.processor.WallclockTimestampExtractor
+        cache.max.bytes.buffering: 0
